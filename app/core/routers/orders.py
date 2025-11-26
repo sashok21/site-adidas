@@ -4,15 +4,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.models.order import Order
-from app.dependencies import SessionDepend
-from app.schemas.orders import (
-    OrderCreateSchema,
-    OrderResponseSchema,
-    OrderPartialUpdateSchema
-)
+from app.core.schemas.orders import OrderResponseSchema, OrderCreateSchema, OrderPartialUpdateSchema
+from app.core.settings.db import db
+
+SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
+
 
 # --- GET (Список) ---
 @router.get(
@@ -25,6 +28,7 @@ async def get_orders(session: SessionDepend):
     query = select(Order).options(selectinload(Order.user), selectinload(Order.items))
     result = await session.execute(query)
     return result.scalars().all()
+
 
 # --- GET (Один об'єкт) ---
 @router.get(
@@ -45,6 +49,7 @@ async def get_order(order_id: int, session: SessionDepend):
         )
     return existing_order
 
+
 # --- CREATE (POST) ---
 @router.post(
     path="/",
@@ -53,8 +58,10 @@ async def get_order(order_id: int, session: SessionDepend):
 )
 async def create_order(order: OrderCreateSchema, session: SessionDepend):
     """Створити нове замовлення."""
-    # ПРИМІТКА: total_amount та order_date будуть заповнені ORM
-    new_order = Order(**order.model_dump())
+    # ВИПРАВЛЕННЯ: Ініціалізуємо total_amount нулем, оскільки поле обов'язкове в БД,
+    # а сума буде рахуватися пізніше при додаванні OrderItem.
+    new_order = Order(**order.model_dump(), total_amount=0.0)
+
     session.add(new_order)
     try:
         await session.commit()
@@ -67,6 +74,7 @@ async def create_order(order: OrderCreateSchema, session: SessionDepend):
             detail=f"Error creating order: {e}"
         )
 
+
 # --- UPDATE (PATCH) ---
 @router.patch(
     path="/{order_id}",
@@ -74,9 +82,9 @@ async def create_order(order: OrderCreateSchema, session: SessionDepend):
     status_code=status.HTTP_200_OK,
 )
 async def partial_update_order(
-    order_id: int,
-    order: OrderPartialUpdateSchema,
-    session: SessionDepend
+        order_id: int,
+        order: OrderPartialUpdateSchema,
+        session: SessionDepend
 ):
     """Частково оновити дані замовлення."""
     existing_order = await session.get(Order, order_id)
@@ -90,9 +98,17 @@ async def partial_update_order(
     for field, value in update_data.items():
         setattr(existing_order, field, value)
 
-    await session.commit()
-    await session.refresh(existing_order)
-    return existing_order
+    try:
+        await session.commit()
+        await session.refresh(existing_order)
+        return existing_order
+    except SQLAlchemyError as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error updating order: {e}"
+        )
+
 
 # --- DELETE ---
 @router.delete(
@@ -108,6 +124,15 @@ async def delete_order(order_id: int, session: SessionDepend):
             detail=f"Order with id={order_id} not found."
         )
 
-    await session.delete(existing_order)
-    await session.commit()
+    try:
+        await session.delete(existing_order)
+        await session.commit()
+    except SQLAlchemyError as e:
+        # Обробка ситуації, коли не можна видалити (наприклад, є зв'язані Items)
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete order. It might have related items. Error: {e}"
+        )
+
     return None

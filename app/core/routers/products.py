@@ -5,13 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import selectinload
 
-from core.models.product import Product
-from dependencies import SessionDepend
-from schemas.products import (
-    ProductCreateSchema,
-    ProductResponseSchema,
-    ProductPartialUpdateSchema
-)
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.models.product import Product
+from app.core.schemas.products import ProductResponseSchema, ProductCreateSchema, ProductPartialUpdateSchema
+from app.core.settings.db import db
+
+SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
 
 
 router = APIRouter(prefix="/products", tags=["Products"])

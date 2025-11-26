@@ -3,7 +3,7 @@ from typing import Annotated
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy import Numeric, ForeignKey, Integer
 
-from .base import BaseModel, int_pk
+from .base import BaseModel
 from .order import Order
 from .product import Product
 
@@ -14,7 +14,7 @@ class OrderItem(BaseModel):
     """Модель Позиція Замовлення (зв'язок M:N між Order та Product)."""
     __tablename__ = "order_items"
 
-    id: Mapped[int_pk]
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)

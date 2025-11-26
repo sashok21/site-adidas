@@ -4,13 +4,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.models.brand import Brand
-from app.dependencies import SessionDepend
-from app.schemas.brands import (
-    BrandCreateSchema,
-    BrandResponseSchema,
-    BrandPartialUpdateSchema
-)
+
+
+from app.core.schemas.brands import BrandResponseSchema, BrandCreateSchema, BrandPartialUpdateSchema
+from app.core.settings.db import Database
+
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.settings.db import db
+
+SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
 
 router = APIRouter(prefix="/brands", tags=["Brands"])
 

@@ -4,13 +4,17 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.core.models.brand import Brand
+
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.models.category import Category
-from app.dependencies import SessionDepend
-from app.schemas.categories import (
-    CategoryCreateSchema,
-    CategoryResponseSchema,
-    CategoryPartialUpdateSchema
-)
+from app.core.schemas.categories import CategoryResponseSchema, CategoryCreateSchema, CategoryPartialUpdateSchema
+from app.core.settings.db import db
+
+SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
 
 router = APIRouter(prefix="/categories", tags=["Categories"])
 

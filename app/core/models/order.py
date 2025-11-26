@@ -2,9 +2,9 @@ from typing import Annotated
 from datetime import datetime
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Numeric, ForeignKey, Text, DateTime, func
+from sqlalchemy import String, Numeric, ForeignKey, Text, DateTime, func, Integer
 
-from .base import BaseModel, int_pk
+from .base import BaseModel
 
 
 
@@ -16,7 +16,7 @@ class Order(BaseModel):
     """Модель Замовлення."""
     __tablename__ = "orders"
 
-    id: Mapped[int_pk]
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 

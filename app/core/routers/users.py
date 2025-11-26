@@ -4,13 +4,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
 
+from typing import Annotated
+from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.models.user import User
-from app.dependencies import SessionDepend
-from app.schemas.users import (
-    UserCreateSchema,
-    UserResponseSchema,
-    UserPartialUpdateSchema
-)
+from app.core.schemas.users import UserResponseSchema, UserCreateSchema, UserPartialUpdateSchema
+from app.core.settings.db import db
+
+SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
