@@ -1,138 +1,78 @@
-from typing import List
+from typing import List, Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
-
-from typing import Annotated
-from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models.order import Order
-from app.core.schemas.orders import OrderResponseSchema, OrderCreateSchema, OrderPartialUpdateSchema
+from app.core.schemas.orders import (
+    OrderResponseSchema,
+    OrderCreateSchema,
+    OrderPartialUpdateSchema
+)
 from app.core.settings.db import db
 
 SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
-
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
 
-# --- GET (Список) ---
-@router.get(
-    path="/",
-    response_model=List[OrderResponseSchema],
-    status_code=status.HTTP_200_OK,
-)
+@router.get("/", response_model=List[OrderResponseSchema])
 async def get_orders(session: SessionDepend):
-    """Отримати список всіх замовлень, включаючи користувача та позиції."""
     query = select(Order).options(selectinload(Order.user), selectinload(Order.items))
     result = await session.execute(query)
     return result.scalars().all()
 
 
-# --- GET (Один об'єкт) ---
-@router.get(
-    path="/{order_id}",
-    response_model=OrderResponseSchema,
-    status_code=status.HTTP_200_OK,
-)
+@router.get("/{order_id}", response_model=OrderResponseSchema)
 async def get_order(order_id: int, session: SessionDepend):
-    """Отримати одне замовлення за ID."""
     query = select(Order).filter(Order.id == order_id).options(selectinload(Order.user), selectinload(Order.items))
     result = await session.execute(query)
-    existing_order = result.scalars().first()
-
-    if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id={order_id} not found."
-        )
-    return existing_order
+    order = result.scalars().first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return order
 
 
-# --- CREATE (POST) ---
-@router.post(
-    path="/",
-    response_model=OrderResponseSchema,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/", response_model=OrderResponseSchema, status_code=201)
 async def create_order(order: OrderCreateSchema, session: SessionDepend):
-    """Створити нове замовлення."""
-    # ВИПРАВЛЕННЯ: Ініціалізуємо total_amount нулем, оскільки поле обов'язкове в БД,
-    # а сума буде рахуватися пізніше при додаванні OrderItem.
     new_order = Order(**order.model_dump(), total_amount=0.0)
-
     session.add(new_order)
     try:
         await session.commit()
-        await session.refresh(new_order)
-        return new_order
+
+        # Надійно завантажуємо User та Items
+        query = select(Order).filter(Order.id == new_order.id).options(selectinload(Order.user),
+                                                                       selectinload(Order.items))
+        result = await session.execute(query)
+        created_order = result.scalars().first()
+
+        return created_order
     except SQLAlchemyError as e:
         await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error creating order: {e}"
-        )
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-# --- UPDATE (PATCH) ---
-@router.patch(
-    path="/{order_id}",
-    response_model=OrderResponseSchema,
-    status_code=status.HTTP_200_OK,
-)
-async def partial_update_order(
-        order_id: int,
-        order: OrderPartialUpdateSchema,
-        session: SessionDepend
-):
-    """Частково оновити дані замовлення."""
-    existing_order = await session.get(Order, order_id)
+@router.patch("/{order_id}", response_model=OrderResponseSchema)
+async def partial_update_order(order_id: int, order: OrderPartialUpdateSchema, session: SessionDepend):
+    query = select(Order).filter(Order.id == order_id).options(selectinload(Order.user), selectinload(Order.items))
+    result = await session.execute(query)
+    existing_order = result.scalars().first()
     if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id={order_id} not found."
-        )
+        raise HTTPException(status_code=404, detail="Order not found")
 
-    update_data = order.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(existing_order, field, value)
+    for key, value in order.model_dump(exclude_unset=True).items():
+        setattr(existing_order, key, value)
 
-    try:
-        await session.commit()
-        await session.refresh(existing_order)
-        return existing_order
-    except SQLAlchemyError as e:
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error updating order: {e}"
-        )
+    await session.commit()
+    return existing_order
 
 
-# --- DELETE ---
-@router.delete(
-    path="/{order_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.delete("/{order_id}", status_code=204)
 async def delete_order(order_id: int, session: SessionDepend):
-    """Видалити замовлення за ID."""
     existing_order = await session.get(Order, order_id)
     if not existing_order:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Order with id={order_id} not found."
-        )
-
-    try:
-        await session.delete(existing_order)
-        await session.commit()
-    except SQLAlchemyError as e:
-        # Обробка ситуації, коли не можна видалити (наприклад, є зв'язані Items)
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete order. It might have related items. Error: {e}"
-        )
-
+        raise HTTPException(status_code=404, detail="Order not found")
+    await session.delete(existing_order)
+    await session.commit()
     return None

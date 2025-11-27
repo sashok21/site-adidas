@@ -3,8 +3,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 
 
-# --- Вкладені схеми ---
-# 1. Спрощена схема User (щоб уникнути циклу з users.py)
+# Вкладені схеми
 class UserOrderNestedSchema(BaseModel):
     id: int
     email: str
@@ -14,7 +13,6 @@ class UserOrderNestedSchema(BaseModel):
         from_attributes = True
 
 
-# 2. Схема OrderItem (для відображення вмісту замовлення)
 class OrderItemOrderNestedSchema(BaseModel):
     id: int
     product_id: int
@@ -25,43 +23,36 @@ class OrderItemOrderNestedSchema(BaseModel):
         from_attributes = True
 
 
-# --- Схеми Order ---
-
+# 1. Create
 class OrderCreateSchema(BaseModel):
-    """Схема для створення нового Замовлення."""
     user_id: int = Field(gt=0)
     status: str = Field(max_length=20)
     shipping_address: Optional[str] = None
 
-    # total_amount та order_date не включаємо, вони генеруються БД/сервером
-
     class Config:
         from_attributes = True
 
 
+# 2. Read (Response)
 class OrderResponseSchema(OrderCreateSchema):
-    """Схема для повернення Замовлення з БД."""
     id: int = Field(gt=0)
-    order_date: datetime  # Повертається після створення
-    total_amount: float  # Повертається після створення/розрахунку
+    order_date: datetime
+    total_amount: float
 
-    # Замінюємо user_id на повний об'єкт User
     user: UserOrderNestedSchema
-    user_id: int = Field(exclude=True)
-
-    # Включаємо список позицій замовлення
     items: List[OrderItemOrderNestedSchema] = []
 
+    # Виключаємо user_id, бо повертаємо повний об'єкт user
+    user_id: int = Field(exclude=True)
+
     class Config:
         from_attributes = True
 
 
+# 3. Update (PATCH)
 class OrderPartialUpdateSchema(BaseModel):
-    """Схема для часткового оновлення Замовлення (PATCH)."""
     status: Optional[str] = Field(default=None, max_length=20)
     shipping_address: Optional[str] = Field(default=None)
-
-    # total_amount: Optional[float] = Field(default=None) # Можна оновлювати, якщо потрібно вручну
 
     class Config:
         from_attributes = True

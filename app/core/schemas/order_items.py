@@ -1,49 +1,35 @@
 from typing import Optional
 from pydantic import BaseModel, Field
-from decimal import Decimal
 
-
-# --- Вкладені схеми ---
-# 1. Спрощена схема Order
+# Вкладені схеми
 class OrderItemOrderNestedSchema(BaseModel):
     id: int
     status: str
     total_amount: float
-
     class Config:
         from_attributes = True
 
-
-# 2. Спрощена схема Product
 class OrderItemProductNestedSchema(BaseModel):
     id: int
     name: str
     price: float
-
     class Config:
         from_attributes = True
 
-
-# --- Схеми OrderItem ---
-
+# 1. Create
 class OrderItemCreateSchema(BaseModel):
-    """Схема для створення нової Позиції Замовлення."""
     order_id: int = Field(gt=0)
     product_id: int = Field(gt=0)
     quantity: int = Field(default=1, gt=0)
 
-    # unit_price не включаємо, оскільки має братися з моделі Product при створенні
-
     class Config:
         from_attributes = True
 
-
+# 2. Read (Response)
 class OrderItemResponseSchema(OrderItemCreateSchema):
-    """Схема для повернення Позиції Замовлення з БД."""
     id: int = Field(gt=0)
-    unit_price: float  # Ціна одиниці на момент замовлення
+    unit_price: float
 
-    # Замінюємо ID на повні об'єкти
     order: OrderItemOrderNestedSchema
     product: OrderItemProductNestedSchema
 
@@ -53,12 +39,10 @@ class OrderItemResponseSchema(OrderItemCreateSchema):
     class Config:
         from_attributes = True
 
-
+# 3. Update (PATCH)
 class OrderItemPartialUpdateSchema(BaseModel):
-    """Схема для часткового оновлення Позиції Замовлення (PATCH)."""
     quantity: Optional[int] = Field(default=None, gt=0)
-
-    # unit_price зазвичай не оновлюється вручну
 
     class Config:
         from_attributes = True
+

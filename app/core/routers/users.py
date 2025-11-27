@@ -1,15 +1,16 @@
-from typing import List
+from typing import List, Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import SQLAlchemyError
-
-from typing import Annotated
-from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models.user import User
-from app.core.schemas.users import UserResponseSchema, UserCreateSchema, UserPartialUpdateSchema
+from app.core.schemas.users import (
+    UserResponseSchema,
+    UserCreateSchema,
+    UserPartialUpdateSchema
+)
 from app.core.settings.db import db
 
 SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
@@ -17,125 +18,78 @@ SessionDepend = Annotated[AsyncSession, Depends(db.get_session)]
 router = APIRouter(prefix="/users", tags=["Users"])
 
 
-# --- GET (Список) ---
-@router.get(
-    path="/",
-    response_model=List[UserResponseSchema],
-    status_code=status.HTTP_200_OK,
-)
+@router.get("/", response_model=List[UserResponseSchema])
 async def get_users(session: SessionDepend):
-    """Отримати список всіх користувачів."""
-    # Завантажуємо зв'язок 'orders'
     query = select(User).options(selectinload(User.orders))
     result = await session.execute(query)
     return result.scalars().all()
 
 
-# --- GET (Один об'єкт) ---
-@router.get(
-    path="/{user_id}",
-    response_model=UserResponseSchema,
-    status_code=status.HTTP_200_OK,
-)
+@router.get("/{user_id}", response_model=UserResponseSchema)
 async def get_user(user_id: int, session: SessionDepend):
-    """Отримати одного користувача за ID."""
+    query = select(User).filter(User.id == user_id).options(selectinload(User.orders))
+    result = await session.execute(query)
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@router.post("/", response_model=UserResponseSchema, status_code=201)
+async def create_user(user: UserCreateSchema, session: SessionDepend):
+    # 1. Створюємо
+    new_user = User(**user.model_dump())
+    session.add(new_user)
+    try:
+        await session.commit()
+
+        # 2. НАДІЙНИЙ СПОСІБ: Завантажуємо створений об'єкт разом зі зв'язками
+        query = select(User).filter(User.id == new_user.id).options(selectinload(User.orders))
+        result = await session.execute(query)
+        created_user = result.scalars().first()
+
+        return created_user
+    except SQLAlchemyError as e:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/{user_id}", response_model=UserResponseSchema)
+async def update_user(user_id: int, user: UserCreateSchema, session: SessionDepend):
     query = select(User).filter(User.id == user_id).options(selectinload(User.orders))
     result = await session.execute(query)
     existing_user = result.scalars().first()
-
     if not existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id={user_id} not found."
-        )
+        raise HTTPException(status_code=404, detail="User not found")
+
+    for key, value in user.model_dump().items():
+        setattr(existing_user, key, value)
+
+    await session.commit()
+    # Тут об'єкт вже завантажений, refresh спрацює, але для надійності можна повернути existing_user
     return existing_user
 
 
-# --- CREATE (POST) ---
-@router.post(
-    path="/",
-    response_model=UserResponseSchema,
-    status_code=status.HTTP_201_CREATED,
-)
-async def create_user(
-        user: UserCreateSchema,
-        session: SessionDepend
-):
-    """Створити нового користувача."""
-    user_data = user.model_dump()
-
-    # Тут можна додати хешування пароля перед створенням об'єкта User
-    new_user = User(**user_data)
-
-    session.add(new_user)
-
-    try:
-        await session.commit()
-        await session.refresh(new_user)
-        return new_user
-    except SQLAlchemyError as e:
-        await session.rollback()
-        # Обробка помилки унікальності (наприклад, email вже існує)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error creating user: {e}"
-        )
-
-
-# --- UPDATE (PATCH) - Часткове оновлення ---
-@router.patch(
-    path="/{user_id}",
-    response_model=UserResponseSchema,
-    status_code=status.HTTP_200_OK,
-)
-async def partial_update_user(
-        user_id: int,
-        user: UserPartialUpdateSchema,
-        session: SessionDepend
-):
-    """Частково оновити дані користувача."""
-    existing_user = await session.get(User, user_id)
-
+@router.patch("/{user_id}", response_model=UserResponseSchema)
+async def partial_update_user(user_id: int, user: UserPartialUpdateSchema, session: SessionDepend):
+    query = select(User).filter(User.id == user_id).options(selectinload(User.orders))
+    result = await session.execute(query)
+    existing_user = result.scalars().first()
     if not existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id={user_id} not found."
-        )
+        raise HTTPException(status_code=404, detail="User not found")
 
-    # Оновлюємо лише ті поля, які були передані в запиті
-    update_data = user.model_dump(exclude_unset=True)
+    for key, value in user.model_dump(exclude_unset=True).items():
+        setattr(existing_user, key, value)
 
-    for field, value in update_data.items():
-        setattr(existing_user, field, value)
-
-    try:
-        await session.commit()
-        await session.refresh(existing_user)
-        return existing_user
-    except SQLAlchemyError as e:
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error updating user: {e}"
-        )
+    await session.commit()
+    return existing_user
 
 
-# --- DELETE ---
-@router.delete(
-    path="/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-)
+@router.delete("/{user_id}", status_code=204)
 async def delete_user(user_id: int, session: SessionDepend):
-    """Видалити користувача за ID."""
     existing_user = await session.get(User, user_id)
-
     if not existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"User with id={user_id} not found."
-        )
-
+        raise HTTPException(status_code=404, detail="User not found")
     await session.delete(existing_user)
     await session.commit()
-
     return None
